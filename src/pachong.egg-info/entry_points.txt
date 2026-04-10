@@ -1,0 +1,2 @@
+[console_scripts]
+pachong = pachong.cli:app

@@ -1,0 +1,24 @@
+site_name: example_article
+
+fetch:
+  headless: true
+  timeout_ms: 30000
+  wait_until: domcontentloaded
+  wait_selector: article
+  wait_for_text_selector: article
+  wait_for_text_min_length: 20
+  auto_scroll: false
+  delay_after_load_ms: 1000
+
+extract:
+  type: article
+  title_selector: h1
+  content_selector: article
+  remove_selectors: []
+  use_trafilatura_fallback: true
+
+output:
+  save_html: true
+  save_markdown: true
+  save_json: true
+  save_screenshot: true

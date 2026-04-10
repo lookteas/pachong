@@ -95,6 +95,7 @@ class SiteAnalyzer:
                 "content_candidates": [candidate.__dict__ for candidate in content_candidates[:5]],
                 "menu_candidates": [candidate.__dict__ for candidate in menu_candidates[:5]],
                 "remove_selectors": remove_selectors,
+                "content_text_length": page_classification["content_text_length"],
                 "page_type": page_classification["page_type"],
                 "batch_candidate": page_classification["batch_candidate"],
                 "batch_confidence": page_classification["batch_confidence"],
@@ -425,6 +426,7 @@ class SiteAnalyzer:
             reasoning.append("未检测到明显目录页特征，默认按详情页处理")
 
         return {
+            "content_text_length": content_len,
             "page_type": page_type,
             "batch_candidate": batch_candidate,
             "batch_confidence": round(min(batch_score, 0.99), 2),

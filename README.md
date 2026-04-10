@@ -240,4 +240,4 @@ pachong/
 
 项目阶段性进展、已实现能力、当前边界和后续方向，统一记录在：
 
-[DEVLOG.md](/d:/code/python/pachong/docs/DEVLOG.md)
+[DEVLOG.md](./docs/DEVLOG.md)

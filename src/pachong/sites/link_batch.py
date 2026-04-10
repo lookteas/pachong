@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class WikiBatchItemResult:
+class LinkBatchItemResult:
     index: int
     path: list[str]
     title: str
@@ -30,7 +31,7 @@ class WikiBatchItemResult:
 
 
 @dataclass
-class WikiBatchRunResult:
+class LinkBatchRunResult:
     site_name: str
     source_url: str
     output_dir: str
@@ -47,7 +48,7 @@ class LinkBatchCrawler:
         self.extractor = ArticleExtractor()
         self.analyzer = SiteAnalyzer()
 
-    async def crawl(self, url: str, output_dir: Path | None = None) -> WikiBatchRunResult:
+    async def crawl(self, url: str, output_dir: Path | None = None) -> LinkBatchRunResult:
         started_at = datetime.now(timezone.utc)
         async with PlaywrightFetcher(self.config.fetch) as fetcher:
             source_snapshot = await fetcher.fetch(url)
@@ -78,7 +79,7 @@ class LinkBatchCrawler:
                 crawl_targets.append({"title": analysis["page_title"] or "当前页面", "url": source_snapshot.final_url})
             crawl_targets.extend({"title": item["title"], "url": item["url"]} for item in child_links)
 
-            items: list[WikiBatchItemResult] = []
+            items: list[LinkBatchItemResult] = []
             seen: set[str] = set()
             for target in crawl_targets:
                 if target["url"] in seen:
@@ -88,13 +89,33 @@ class LinkBatchCrawler:
                 index = len(items) + 1
                 logger.info("link batch crawling %s/%s: %s", index, len(crawl_targets), target["title"])
                 snapshot = source_snapshot if target["url"] == source_snapshot.final_url else await fetcher.fetch(target["url"])
+                child_analysis = self.analyzer.analyze_html(
+                    url=snapshot.final_url,
+                    html=snapshot.html,
+                    page_title=snapshot.title,
+                )
+                child_meta = child_analysis["analysis"]
+                if (
+                    target["url"] != source_snapshot.final_url
+                    and child_meta["batch_candidate"]
+                    and child_meta["child_link_count"] >= 5
+                    and child_meta["page_type"] in {"index_page", "hybrid_page"}
+                    and child_meta["content_text_length"] < 500
+                ):
+                    logger.info(
+                        "skip directory-like child page: %s (type=%s, child_links=%s)",
+                        target["title"],
+                        child_meta["page_type"],
+                        child_meta["child_link_count"],
+                    )
+                    continue
 
                 title, markdown = self.extractor.extract(snapshot.html, self.config.extract)
                 resolved_title = title or target["title"] or f"page-{index}"
                 if target["url"] == source_snapshot.final_url and page_type in {"index_page", "hybrid_page"}:
                     summary = f"目录入口页，包含 {len(child_links)} 个候选子页面。"
                 else:
-                    summary = self._build_summary(markdown)
+                    summary = self._build_summary(markdown, resolved_title)
                 file_stem = f"{index:03d}-{self._slugify(resolved_title)}"
 
                 markdown_path = markdown_dir / f"{file_stem}.md"
@@ -106,7 +127,7 @@ class LinkBatchCrawler:
                     html_path.write_text(snapshot.html, encoding="utf-8")
 
                 items.append(
-                    WikiBatchItemResult(
+                    LinkBatchItemResult(
                         index=index,
                         path=[resolved_title],
                         title=resolved_title,
@@ -154,7 +175,7 @@ class LinkBatchCrawler:
             encoding="utf-8",
         )
 
-        return WikiBatchRunResult(
+        return LinkBatchRunResult(
             site_name=self.config.site_name,
             source_url=url,
             output_dir=str(base_output),
@@ -183,7 +204,7 @@ class LinkBatchCrawler:
         slug = "".join(allowed).strip("-_")
         return slug or "page"
 
-    def _build_summary(self, markdown: str | None) -> str:
+    def _build_summary(self, markdown: str | None, title: str | None = None) -> str:
         if not markdown:
             return "暂无摘要"
 
@@ -192,17 +213,14 @@ class LinkBatchCrawler:
             line = raw_line.strip()
             if not line:
                 continue
-            if line.startswith("#"):
-                continue
             if line.startswith("```"):
                 continue
             if line.startswith("![") or line.startswith("<img"):
                 continue
-            cleaned = line.lstrip("-* ").strip()
-            if cleaned.startswith("[") and "](" in cleaned:
+            cleaned = self._normalize_summary_line(line, title=title)
+            if not cleaned:
                 continue
-            if cleaned:
-                lines.append(cleaned)
+            lines.append(cleaned)
             if len(lines) >= 2:
                 break
 
@@ -215,11 +233,35 @@ class LinkBatchCrawler:
             summary = summary[:77].rstrip() + "..."
         return summary or "暂无摘要"
 
+    def _normalize_summary_line(self, line: str, title: str | None = None) -> str:
+        cleaned = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", line)
+        cleaned = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", cleaned)
+        cleaned = re.sub(r"`+", "", cleaned)
+        cleaned = re.sub(r"^\s*#+\s*", "", cleaned)
+        cleaned = re.sub(r"\s*#+\s*", " ", cleaned)
+        cleaned = re.sub(r"^\s*[-*+]\s*", "", cleaned)
+        cleaned = re.sub(r"^\s*\d+[.)、]\s*", "", cleaned)
+        cleaned = re.sub(r"^\s*(?:[一二三四五六七八九十]+[、.]|[（(]?\d+[）)])\s*", "", cleaned)
+        cleaned = cleaned.replace("**", "").replace("__", "")
+        cleaned = re.sub(r"<[^>]+>", "", cleaned)
+        cleaned = " ".join(cleaned.split()).strip(" -|")
+        if not cleaned:
+            return ""
+        if title and cleaned == title:
+            return ""
+        if title and cleaned.startswith(title + " "):
+            cleaned = cleaned[len(title) :].strip()
+        if cleaned in {"复制链接", "目录：", "目录:", "暂无摘要"}:
+            return ""
+        if re.fullmatch(r"(功能介绍|操作流程|功能说明|使用说明|注意事项)", cleaned):
+            return ""
+        return cleaned
+
     def _build_toc_markdown(
         self,
         source_url: str,
         page_count: int,
-        items: list[WikiBatchItemResult],
+        items: list[LinkBatchItemResult],
     ) -> str:
         lines = [
             "# 文档总目录",
@@ -244,7 +286,7 @@ async def run_link_batch(
     url: str,
     config_path: Path | None = None,
     output_dir: Path | None = None,
-) -> WikiBatchRunResult:
+) -> LinkBatchRunResult:
     config = load_site_config(config_path)
     crawler = LinkBatchCrawler(config)
     return await crawler.crawl(url, output_dir=output_dir)

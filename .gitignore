@@ -2,7 +2,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
-data/
+data/analyze
+data/batch
+data/html
+data/markdown
+data/json
+data/screenshots
 dist/
 build/
 *.egg-info/

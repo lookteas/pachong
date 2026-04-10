@@ -8,7 +8,8 @@ import typer
 
 from pachong.analyze import run_analyze
 from pachong.runner import run_crawl
-from pachong.sites.jjjshop_batch import run_jjjshop_batch
+from pachong.sites.click_batch import run_click_batch
+from pachong.sites.link_batch import run_link_batch
 from pachong.utils.log import setup_logging
 
 app = typer.Typer(help="Dynamic website crawler MVP")
@@ -50,12 +51,12 @@ def crawl(
 
 @app.command("batch")
 def batch(
-    url: str = typer.Argument(..., help="A jjjshop document URL within the target category."),
+    url: str = typer.Argument(..., help="A documentation page URL for batch crawling."),
     config: Optional[Path] = typer.Option(
         Path("configs/sites/jjjshop_doc.yaml"),
         "--config",
         "-c",
-        help="Path to the jjjshop site config YAML file.",
+        help="Path to the site config YAML file.",
     ),
     output_dir: Optional[Path] = typer.Option(
         None,
@@ -64,11 +65,20 @@ def batch(
         help="Optional output directory for the batch crawl.",
     ),
 ) -> None:
-    """Batch crawl all left-menu pages for the current jjjshop category."""
+    """Batch crawl pages for a supported documentation site."""
     setup_logging()
-    result = asyncio.run(run_jjjshop_batch(url, config, output_dir))
-
-    typer.echo(f"site_name: {result.site_name}")
+    config_path = config
+    try:
+        result = asyncio.run(run_link_batch(url, config_path, output_dir))
+        typer.echo(f"site_name: {result.site_name}")
+        typer.echo("batch_strategy: link_batch")
+        typer.echo(f"page_type: {result.page_type}")
+        typer.echo(f"batch_confidence: {result.batch_confidence}")
+    except RuntimeError as exc:
+        typer.echo(f"link_batch_skipped: {exc}")
+        result = asyncio.run(run_click_batch(url, config_path, output_dir))
+        typer.echo(f"site_name: {result.site_name}")
+        typer.echo("batch_strategy: click_batch")
     typer.echo(f"page_count: {result.page_count}")
     typer.echo(f"output_dir: {result.output_dir}")
     typer.echo(f"toc: {result.toc_path}")

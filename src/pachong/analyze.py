@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import yaml
 from selectolax.parser import HTMLParser, Node
@@ -46,6 +46,13 @@ class SiteAnalyzer:
             parser,
             content_node=content_node,
             menu_candidates=menu_candidates,
+        )
+        child_links = self._extract_child_links(url, content_node or parser.root)
+        page_classification = self._classify_page(
+            url=url,
+            parser=parser,
+            content_node=content_node,
+            child_links=child_links,
         )
 
         menu_selector = menu_candidates[0].selector if menu_candidates else None
@@ -88,6 +95,12 @@ class SiteAnalyzer:
                 "content_candidates": [candidate.__dict__ for candidate in content_candidates[:5]],
                 "menu_candidates": [candidate.__dict__ for candidate in menu_candidates[:5]],
                 "remove_selectors": remove_selectors,
+                "page_type": page_classification["page_type"],
+                "batch_candidate": page_classification["batch_candidate"],
+                "batch_confidence": page_classification["batch_confidence"],
+                "child_link_count": len(child_links),
+                "child_links": child_links[:50],
+                "reasoning": page_classification["reasoning"],
             },
         }
 
@@ -297,6 +310,152 @@ class SiteAnalyzer:
 
     def _clean_text(self, value: str) -> str:
         return " ".join(value.split())
+
+    def _extract_child_links(self, base_url: str, node: Node | None) -> list[dict]:
+        if node is None:
+            return []
+
+        base_parsed = urlparse(base_url)
+        current_segments = [segment for segment in base_parsed.path.split("/") if segment]
+        current_prefix = "/".join(current_segments[:-1]) if current_segments else ""
+        candidates: list[dict] = []
+        seen: set[str] = set()
+
+        for link in node.css("a[href]"):
+            href = (link.attributes.get("href") or "").strip()
+            if not href:
+                continue
+            absolute_url = urljoin(base_url, href)
+            parsed = urlparse(absolute_url)
+            if parsed.netloc and parsed.netloc != base_parsed.netloc:
+                continue
+            if parsed.fragment:
+                continue
+
+            text = self._normalize_link_title(link.text(separator=" ", strip=True))
+            if not self._is_good_child_link_text(text):
+                continue
+
+            path_segments = [segment for segment in parsed.path.split("/") if segment]
+            path_prefix = "/".join(path_segments[:-1]) if path_segments else ""
+            same_prefix = bool(current_prefix and path_prefix == current_prefix)
+            same_host = parsed.netloc == base_parsed.netloc
+            score = 0
+            if same_host:
+                score += 0.3
+            if same_prefix:
+                score += 0.45
+            if len(text) >= 2:
+                score += 0.15
+            if re.search(r"\d{4,}", parsed.path):
+                score += 0.1
+
+            key = absolute_url
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                {
+                    "title": text,
+                    "url": absolute_url,
+                    "score": round(min(score, 1.0), 2),
+                    "same_path_prefix": same_prefix,
+                }
+            )
+
+        candidates.sort(key=lambda item: (-item["score"], item["title"]))
+        return candidates
+
+    def _classify_page(
+        self,
+        url: str,
+        parser: HTMLParser,
+        content_node: Node | None,
+        child_links: list[dict],
+    ) -> dict:
+        content_text = self._clean_text(content_node.text(separator=" ", strip=True)) if content_node else ""
+        content_len = len(content_text)
+        matched_child_links = [item for item in child_links if item["score"] >= 0.6]
+        child_link_count = len(matched_child_links)
+        has_outline_keyword = any(
+            parser.body.text(separator=" ", strip=True).find(keyword) >= 0
+            for keyword in ["目录", "大纲", "章节", "目录：", "目录:"]
+        )
+        same_prefix_count = sum(1 for item in matched_child_links if item["same_path_prefix"])
+
+        reasoning: list[str] = []
+        batch_score = 0.0
+
+        if child_link_count >= 8:
+            batch_score += 0.45
+            reasoning.append(f"检测到 {child_link_count} 个高置信度子链接")
+        elif child_link_count >= 5:
+            batch_score += 0.3
+            reasoning.append(f"检测到 {child_link_count} 个子链接，已达到目录页候选阈值")
+
+        if same_prefix_count >= 5:
+            batch_score += 0.25
+            reasoning.append(f"{same_prefix_count} 个子链接与当前页面同路径前缀")
+
+        if has_outline_keyword:
+            batch_score += 0.15
+            reasoning.append("页面出现“目录/大纲/章节”等目录型语义")
+
+        if child_link_count >= 5 and content_len < 300:
+            batch_score += 0.25
+            reasoning.append(f"正文有效文本较短（约 {content_len} 字），更像目录入口页")
+        elif content_len >= 800:
+            reasoning.append(f"正文长度较长（约 {content_len} 字），更像详情页")
+
+        if child_link_count == 0 and content_len >= 300:
+            page_type = "detail_page"
+        elif batch_score >= 0.7 and content_len < 400:
+            page_type = "index_page"
+        elif batch_score >= 0.45 and content_len >= 300:
+            page_type = "hybrid_page"
+        elif child_link_count >= 5:
+            page_type = "hybrid_page"
+        else:
+            page_type = "detail_page"
+
+        batch_candidate = batch_score >= 0.45 and child_link_count >= 5
+        if batch_candidate and not reasoning:
+            reasoning.append("页面满足批量抓取候选条件")
+        if not reasoning:
+            reasoning.append("未检测到明显目录页特征，默认按详情页处理")
+
+        return {
+            "page_type": page_type,
+            "batch_candidate": batch_candidate,
+            "batch_confidence": round(min(batch_score, 0.99), 2),
+            "reasoning": reasoning,
+        }
+
+    def _is_good_child_link_text(self, text: str) -> bool:
+        if not text:
+            return False
+        if len(text) > 40:
+            return False
+        bad_keywords = [
+            "首页",
+            "官网",
+            "登录",
+            "注册",
+            "复制链接",
+            "评论",
+            "点赞",
+            "最新",
+            "最早",
+            "上一篇",
+            "下一篇",
+        ]
+        return not any(keyword in text for keyword in bad_keywords)
+
+    def _normalize_link_title(self, text: str) -> str:
+        cleaned = self._clean_text(text)
+        cleaned = re.sub(r"\b\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b", "", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -|")
+        return cleaned
 
     def _semantic_content_bonus(self, node: Node) -> float:
         attrs = " ".join(

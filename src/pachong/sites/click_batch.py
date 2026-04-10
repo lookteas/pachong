@@ -39,14 +39,14 @@ class BatchRunResult:
     page_count: int
 
 
-class JJJShopBatchCrawler:
+class ClickBatchCrawler:
     def __init__(self, config: SiteConfig):
         self.config = config
         self.extractor = ArticleExtractor()
         self.playwright: Playwright | None = None
         self.browser: Browser | None = None
 
-    async def __aenter__(self) -> "JJJShopBatchCrawler":
+    async def __aenter__(self) -> "ClickBatchCrawler":
         self.playwright = await async_playwright().start()
         self.browser = await self.playwright.chromium.launch(headless=self.config.fetch.headless)
         return self
@@ -375,11 +375,11 @@ class JJJShopBatchCrawler:
         return summary or "暂无摘要"
 
 
-async def run_jjjshop_batch(
+async def run_click_batch(
     url: str,
     config_path: Path | None = None,
     output_dir: Path | None = None,
 ) -> BatchRunResult:
     config = load_site_config(config_path)
-    async with JJJShopBatchCrawler(config) as crawler:
+    async with ClickBatchCrawler(config) as crawler:
         return await crawler.crawl(url, output_dir=output_dir)

@@ -9,7 +9,7 @@
 - 动态渲染页面抓取
 - 基于配置的标题与正文提取
 - 新站点分析与配置草稿生成
-- `jjjshop` 文档站的左侧菜单批量抓取
+- 左侧菜单型文档站的批量抓取
 
 ## 项目架构
 
@@ -39,7 +39,8 @@
 
 当前已有：
 
-- `jjjshop_batch.py`
+- `click_batch.py`：面向菜单点击型文档站
+- `link_batch.py`：面向目录链接型文档站
 
 ## 功能说明
 
@@ -60,12 +61,17 @@
 
 ### `batch`
 
-当前用于 `jjjshop` 文档站的批量抓取。
+当前支持两类批量抓取：
+
+- `click_batch`：递归左侧菜单逐页抓取
+- `link_batch`：基于 `analyze` 输出的 `child_links` 抓取子页面
+
+`batch` 命令会优先依据 `analyze` 的页面类型判断自动选择批量策略，而不是依赖配置文件名分流。
 
 能力包括：
 
-- 递归左侧菜单
-- 逐项点击页面
+- 递归左侧菜单或提取目录页子链接
+- 逐项点击页面或逐页访问子链接
 - 逐页保存 Markdown 和 HTML
 - 自动生成目录索引文档
 - 按 `category_id` 自动分目录，避免覆盖
@@ -81,6 +87,12 @@
 - 识别正文候选 selector
 - 识别菜单候选 selector
 - 识别需要剔除的噪音区域
+- 识别候选子链接
+- 判断页面类型：
+  - `detail_page`
+  - `index_page`
+  - `hybrid_page`
+- 判断是否建议启动批量抓取
 - 生成 `report.json`
 - 生成 `site_config.yaml` 配置草稿
 
@@ -112,8 +124,7 @@
 站点配置文件位于：
 
 - `configs/sites/example_article.yaml`
-- `configs/sites/jjjshop_doc.yaml`
-- `configs/sites/crmeb_doc.yaml`
+- `configs/sites/` 下的站点配置文件
 
 配置主要分为三部分：
 
@@ -147,17 +158,17 @@ pachong crawl "https://example.com/article/123"
 使用专用站点配置：
 
 ```bash
-pachong crawl "https://doc.jjjshop.net/multi?category_id=10026&document_id=116" --config configs/sites/jjjshop_doc.yaml
+pachong crawl "<文档站页面 URL>" --config configs/sites/<站点配置A>.yaml
 ```
 
 ```bash
-pachong crawl "https://doc.crmeb.com/mer/mer3_4/33374" --config configs/sites/crmeb_doc.yaml
+pachong crawl "<另一类文档站页面 URL>" --config configs/sites/<站点配置B>.yaml
 ```
 
 ### 分析新站点
 
 ```bash
-pachong analyze "https://doc.crmeb.com/mer/mer3_4/33374"
+pachong analyze "<待分析页面 URL>"
 ```
 
 默认会生成：
@@ -167,18 +178,18 @@ pachong analyze "https://doc.crmeb.com/mer/mer3_4/33374"
 - `report.json`
 - `site_config.yaml`
 
-### 批量抓取 jjjshop
+### 批量抓取菜单型文档站
 
 ```bash
-pachong batch "https://doc.jjjshop.net/multi?category_id=10026&document_id=116"
+pachong batch "<栏目入口页面 URL>"
 ```
 
 默认输出目录示例：
 
-- `data/batch/jjjshop_doc/category_10026/markdown/`
-- `data/batch/jjjshop_doc/category_10026/html/`
-- `data/batch/jjjshop_doc/category_10026/toc.json`
-- `data/batch/jjjshop_doc/category_10026/目录总览.md`
+- `data/batch/<site_name>/category_<id>/markdown/`
+- `data/batch/<site_name>/category_<id>/html/`
+- `data/batch/<site_name>/category_<id>/toc.json`
+- `data/batch/<site_name>/category_<id>/目录总览.md`
 
 不同 `category_id` 会自动分目录，避免覆盖。
 
@@ -191,8 +202,7 @@ pachong/
 ├── configs/
 │   └── sites/
 │       ├── example_article.yaml
-│       ├── jjjshop_doc.yaml
-│       └── crmeb_doc.yaml
+│       └── <site_name>.yaml
 ├── docs/
 │   └── DEVLOG.md
 ├── src/

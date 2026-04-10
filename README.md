@@ -68,6 +68,14 @@
 
 `batch` 命令会优先依据 `analyze` 的页面类型判断自动选择批量策略，而不是依赖配置文件名分流。
 
+也可以通过参数显式指定策略：
+
+```bash
+pachong batch "<页面 URL>" --strategy auto
+pachong batch "<页面 URL>" --strategy click
+pachong batch "<页面 URL>" --strategy link
+```
+
 能力包括：
 
 - 递归左侧菜单或提取目录页子链接

@@ -58,6 +58,11 @@ def batch(
         "-c",
         help="Path to the site config YAML file.",
     ),
+    strategy: str = typer.Option(
+        "auto",
+        "--strategy",
+        help="Batch strategy: auto, click, or link.",
+    ),
     output_dir: Optional[Path] = typer.Option(
         None,
         "--output-dir",
@@ -68,17 +73,31 @@ def batch(
     """Batch crawl pages for a supported documentation site."""
     setup_logging()
     config_path = config
-    try:
+    if strategy not in {"auto", "click", "link"}:
+        raise typer.BadParameter("strategy must be one of: auto, click, link")
+
+    if strategy == "link":
         result = asyncio.run(run_link_batch(url, config_path, output_dir))
         typer.echo(f"site_name: {result.site_name}")
         typer.echo("batch_strategy: link_batch")
         typer.echo(f"page_type: {result.page_type}")
         typer.echo(f"batch_confidence: {result.batch_confidence}")
-    except RuntimeError as exc:
-        typer.echo(f"link_batch_skipped: {exc}")
+    elif strategy == "click":
         result = asyncio.run(run_click_batch(url, config_path, output_dir))
         typer.echo(f"site_name: {result.site_name}")
         typer.echo("batch_strategy: click_batch")
+    else:
+        try:
+            result = asyncio.run(run_link_batch(url, config_path, output_dir))
+            typer.echo(f"site_name: {result.site_name}")
+            typer.echo("batch_strategy: link_batch")
+            typer.echo(f"page_type: {result.page_type}")
+            typer.echo(f"batch_confidence: {result.batch_confidence}")
+        except RuntimeError as exc:
+            typer.echo(f"link_batch_skipped: {exc}")
+            result = asyncio.run(run_click_batch(url, config_path, output_dir))
+            typer.echo(f"site_name: {result.site_name}")
+            typer.echo("batch_strategy: click_batch")
     typer.echo(f"page_count: {result.page_count}")
     typer.echo(f"output_dir: {result.output_dir}")
     typer.echo(f"toc: {result.toc_path}")

@@ -1,182 +1,186 @@
 # Pachong
 
-`Pachong` 是一个面向现代文档站和动态网站的爬虫工具。它的核心目标不是“写一个一次性的抓取脚本”，而是提供一套可以持续适配新站点的工作流：
+`Pachong` 是一个面向现代文档站和动态网站的爬虫工具。项目的目标不是生成一次性的站点脚本，而是建立一套稳定的站点适配流程：
 
-1. 先分析页面结构
-2. 再生成站点配置草稿
-3. 然后执行单页抓取或批量抓取
-4. 最终输出 HTML、Markdown、JSON、截图和目录索引
+`analyze -> 生成配置草稿 -> 单页验证 -> 批量抓取`
 
-当前项目已经可以稳定处理一类典型场景：
+当前项目重点覆盖以下场景：
 
 - 动态渲染页面抓取
-- 基于站点配置的正文提取
-- `jjjshop` 文档站左侧栏目批量抓取
-- 新站点页面分析与配置草稿生成
+- 基于配置的标题与正文提取
+- 新站点分析与配置草稿生成
+- `jjjshop` 文档站的左侧菜单批量抓取
 
-## 核心能力
+## 项目架构
 
-- `crawl`
-  用于单页抓取。适合先验证一个页面能不能干净拿到标题、正文和图片。
+项目分为三层：
 
-- `batch`
-  用于批量抓取。当前已针对 `jjjshop` 文档站实现，能够递归左侧菜单并批量保存页面内容。
+### 1. 抓取内核
 
-- `analyze`
-  用于新站点分析。自动抓取页面 HTML 和截图，识别标题、正文、菜单、噪音区域，并生成 `site_config.yaml` 配置草稿。
+负责页面访问、等待加载、截图、HTML 获取。
 
-## 当前支持的站点形态
+核心组件：
 
-- `jjjshop`
-  典型特征：左侧多级菜单，点击后右侧正文切换。
+- `PlaywrightFetcher`
+- `runner.py`
 
-- `CRMEB`
-  典型特征：标准文档详情页结构，正文区、右侧大纲、评论区、操作区混合存在。
+### 2. 提取层
 
-项目并不是把所有网站硬编码成独立爬虫，而是通过：
+负责根据配置提取标题、正文和清理噪音区域。
 
-- 通用抓取内核
-- 站点配置文件
-- 必要时的站点专用批量逻辑
+核心组件：
 
-来逐步扩展更多站点。
+- `ArticleExtractor`
+- `configs/sites/*.yaml`
 
-## 安装
+### 3. 站点适配层
+
+负责处理某类站点的特殊批量逻辑或菜单遍历逻辑。
+
+当前已有：
+
+- `jjjshop_batch.py`
+
+## 功能说明
+
+### `crawl`
+
+抓取单个页面，输出：
+
+- HTML
+- Markdown
+- JSON
+- 页面截图
+
+适合用来：
+
+- 验证站点配置是否正确
+- 检查标题和正文是否提取干净
+- 为后续批量抓取做前置验证
+
+### `batch`
+
+当前用于 `jjjshop` 文档站的批量抓取。
+
+能力包括：
+
+- 递归左侧菜单
+- 逐项点击页面
+- 逐页保存 Markdown 和 HTML
+- 自动生成目录索引文档
+- 按 `category_id` 自动分目录，避免覆盖
+
+### `analyze`
+
+用于新站点页面分析。
+
+能力包括：
+
+- 抓取 HTML 快照和页面截图
+- 识别标题候选 selector
+- 识别正文候选 selector
+- 识别菜单候选 selector
+- 识别需要剔除的噪音区域
+- 生成 `report.json`
+- 生成 `site_config.yaml` 配置草稿
+
+## 技术实现
+
+### 动态页面抓取
+
+使用 `Playwright` 访问页面，并支持：
+
+- `wait_selector`
+- `wait_for_text_selector`
+- `delay_after_load_ms`
+
+这保证了页面不是“刚打开就抓”，而是等正文区域真正有内容之后再抓取。
+
+### 正文提取
+
+正文提取优先采用“正文节点 HTML -> Markdown”的方式，避免纯图片内容或结构化文档被过度裁剪。
+
+当前提取链路大致是：
+
+1. 先定位 `content_selector`
+2. 对正文节点做噪音清理
+3. 将正文 HTML 转换为 Markdown
+4. 必要时回退到 `trafilatura`
+
+### 站点配置
+
+站点配置文件位于：
+
+- `configs/sites/example_article.yaml`
+- `configs/sites/jjjshop_doc.yaml`
+- `configs/sites/crmeb_doc.yaml`
+
+配置主要分为三部分：
+
+- `fetch`
+- `extract`
+- `output`
+
+这样做的目的是把“站点适配”从代码里拆出来，优先通过配置解决不同网站的结构差异。
+
+## 使用说明
+
+### 安装
 
 ```bash
 pip install -e .
 playwright install chromium
 ```
 
-如果你刚更新过代码或依赖定义，建议重新执行一次：
+如果更新过代码或依赖定义，建议重新执行：
 
 ```bash
 pip install -e .
 ```
 
-## 快速开始
-
-### 1. 单页抓取
+### 单页抓取
 
 ```bash
 pachong crawl "https://example.com/article/123"
 ```
 
-默认会输出到：
-
-- `data/html/`
-- `data/markdown/`
-- `data/json/`
-- `data/screenshots/`
-
-### 2. 使用站点配置抓取
-
-`jjjshop` 示例：
+使用专用站点配置：
 
 ```bash
 pachong crawl "https://doc.jjjshop.net/multi?category_id=10026&document_id=116" --config configs/sites/jjjshop_doc.yaml
 ```
 
-`CRMEB` 示例：
-
 ```bash
 pachong crawl "https://doc.crmeb.com/mer/mer3_4/33374" --config configs/sites/crmeb_doc.yaml
 ```
 
-### 3. 分析新站点
-
-遇到一个还没适配的新站，建议先分析：
+### 分析新站点
 
 ```bash
 pachong analyze "https://doc.crmeb.com/mer/mer3_4/33374"
 ```
 
-分析结果会输出到类似目录：
+默认会生成：
 
-- `data/analyze/<site_name>/<timestamp>/page.html`
-- `data/analyze/<site_name>/<timestamp>/page.png`
-- `data/analyze/<site_name>/<timestamp>/report.json`
-- `data/analyze/<site_name>/<timestamp>/site_config.yaml`
+- 页面 HTML 快照
+- 页面截图
+- `report.json`
+- `site_config.yaml`
 
-其中：
-
-- `report.json` 是分析报告
-- `site_config.yaml` 是可继续调整并复用的配置草稿
-
-### 4. 批量抓取 jjjshop 左侧栏目
+### 批量抓取 jjjshop
 
 ```bash
 pachong batch "https://doc.jjjshop.net/multi?category_id=10026&document_id=116"
 ```
 
-默认输出到：
+默认输出目录示例：
 
 - `data/batch/jjjshop_doc/category_10026/markdown/`
 - `data/batch/jjjshop_doc/category_10026/html/`
 - `data/batch/jjjshop_doc/category_10026/toc.json`
 - `data/batch/jjjshop_doc/category_10026/目录总览.md`
 
-不同 `category_id` 会自动输出到不同目录，避免覆盖。
-
-## 推荐工作流
-
-这是目前最推荐的使用顺序：
-
-### 场景一：新站点接入
-
-1. 先执行 `analyze`
-2. 查看 `report.json` 和页面截图
-3. 调整 `site_config.yaml`
-4. 使用 `crawl --config` 验证单页抓取质量
-5. 如果页面是目录页，再决定是否做批量抓取
-
-### 场景二：已适配站点批量抓取
-
-1. 先用 `crawl --config` 验证一个页面
-2. 确认 Markdown 输出没问题
-3. 再执行 `batch`
-4. 查看 `目录总览.md`
-
-## 为什么要有站点配置
-
-不同文档站虽然都是“左边目录、右边正文”，但底层结构差异非常大。一个稳定的爬虫项目，不能只靠一个通用 `article` 规则就试图适配所有站点。
-
-站点配置主要解决这些问题：
-
-- 标题在哪
-- 正文在哪
-- 菜单在哪
-- 哪些区域是噪音
-- 页面什么时候算加载完成
-- 批量抓取时应该点哪里
-
-当前配置文件主要包括：
-
-- `fetch`
-  定义等待策略、超时、正文加载判断等。
-
-- `extract`
-  定义标题 selector、正文 selector、要移除的噪音区域等。
-
-- `output`
-  定义是否保存 HTML、Markdown、JSON、截图。
-
-## analyze 的定位
-
-`analyze` 不是万能自动适配器，但它能显著减少人工试错时间。
-
-它当前会尝试识别：
-
-- 标题 selector
-- 正文候选区域
-- 菜单候选区域
-- 需要剔除的噪音区域
-
-它更像“站点配置草稿生成器”，而不是“完全自动决定一切”的黑盒。推荐做法是：
-
-1. 让 `analyze` 先给出建议
-2. 人工快速确认
-3. 保存为正式配置
+不同 `category_id` 会自动分目录，避免覆盖。
 
 ## 项目结构
 
@@ -189,6 +193,8 @@ pachong/
 │       ├── example_article.yaml
 │       ├── jjjshop_doc.yaml
 │       └── crmeb_doc.yaml
+├── docs/
+│   └── DEVLOG.md
 ├── src/
 │   └── pachong/
 │       ├── cli.py
@@ -198,80 +204,30 @@ pachong/
 │       ├── fetchers/
 │       ├── models/
 │       ├── sites/
-│       │   └── jjjshop_batch.py
 │       ├── storage/
 │       └── utils/
 ├── tests/
 └── 爬取动态渲染网站.md
 ```
 
-## 重要输出说明
+## 输出说明
 
 ### 单页抓取输出
 
-- HTML：保留原始页面结构，便于排查
-- Markdown：适合人工阅读和知识沉淀
-- JSON：适合程序消费和后续处理
-- 截图：用于快速确认页面是否真正加载完成
+- HTML：用于排查页面结构
+- Markdown：用于阅读、沉淀和后处理
+- JSON：用于程序消费
+- 截图：用于确认页面是否正确加载
 
 ### 批量抓取输出
 
-- 每页一个 Markdown 文件
-- 每页一个 HTML 文件
+- 每页一个 Markdown
+- 每页一个 HTML
 - `toc.json`：机器可读索引
 - `目录总览.md`：人可读目录
 
-## 已实现的关键设计
+## 开发日志
 
-- 使用 `Playwright` 处理动态页面
-- 等待正文节点真正有内容后再抓取
-- 正文区域优先使用 HTML 转 Markdown，避免纯图片页面被裁掉
-- `jjjshop` 支持同一页面内递归点击左侧菜单
-- 批量目录会自动生成带链接和摘要的总览文档
-- `batch` 输出目录按 `category_id` 自动隔离，避免互相覆盖
-- `analyze` 能为新站生成配置草稿
+项目阶段性进展、已实现能力、当前边界和后续方向，统一记录在：
 
-## 当前边界
-
-当前项目已经能解决“接入新文档站”和“抓取站内文档”的大部分基础问题，但仍有一些能力尚未完善：
-
-- `CRMEB` 批量抓取尚未正式接入
-- `analyze` 还没有自动判断“是否建议启动批量抓取”
-- 还没有统一的批量任务调度与断点续跑系统
-- 还没有网络接口监听抓取能力
-- 还没有 SQLite 状态管理
-
-## 适合下一步继续做的方向
-
-- 增强 `analyze`
-  增加页面分类能力，判断当前页是正文页、目录页还是混合页。
-
-- 扩展 `batch`
-  从 `jjjshop` 专用批量抓取，逐步演进为“站点适配器 + 通用批量入口”。
-
-- 增加任务存储
-  记录抓取状态、失败原因、重试信息和断点续跑信息。
-
-- 增加接口抓取
-  针对 SPA 文档站，直接分析并抓取 XHR/fetch 数据。
-
-## 提交说明
-
-如果你已经初始化了仓库，推荐先完成：
-
-```bash
-git add .
-git commit -m "feat: bootstrap crawler, analysis, and jjjshop batch workflow"
-```
-
-## 备注
-
-设计思路文档保存在：
-
-[爬取动态渲染网站.md](/d:/code/python/pachong/爬取动态渲染网站.md)
-
-如果你准备继续扩展更多站点，建议以后都遵循这条路线：
-
-`analyze -> 生成配置草稿 -> 单页验证 -> 批量抓取`
-
-这样成本最低，也最稳。
+[DEVLOG.md](/d:/code/python/pachong/docs/DEVLOG.md)

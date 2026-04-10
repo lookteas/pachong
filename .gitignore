@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 data/
+dist/
+build/
+*.egg-info/
+src/pachong.egg-info/

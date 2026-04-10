@@ -16,6 +16,8 @@
 - 完成 `analyze` 的页面分类、子链接提取与 batch 候选判断能力
 - 完成 `batch` 自动分流，支持基于 analyze 结果自动选择批量策略
 - 完成 `batch --strategy auto|click|link`，支持显式控制批量策略
+- 完成 `analyze --save-config`，支持将配置草稿一键保存到 `configs/sites/`
+- 完成 `analyze` 的 Markdown 页面分类报告输出
 
 ### 当前可用命令
 

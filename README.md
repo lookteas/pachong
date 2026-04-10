@@ -179,11 +179,18 @@ pachong crawl "<另一类文档站页面 URL>" --config configs/sites/<站点配
 pachong analyze "<待分析页面 URL>"
 ```
 
+也可以直接把配置草稿保存到 `configs/sites/`：
+
+```bash
+pachong analyze "<待分析页面 URL>" --save-config my_site
+```
+
 默认会生成：
 
 - 页面 HTML 快照
 - 页面截图
 - `report.json`
+- `report.md`
 - `site_config.yaml`
 
 ### 批量抓取菜单型文档站

@@ -112,6 +112,11 @@ def analyze(
         "--site-name",
         help="Optional site name override for the generated config.",
     ),
+    save_config: Optional[str] = typer.Option(
+        None,
+        "--save-config",
+        help="Save the generated config draft into configs/sites/<name>.yaml.",
+    ),
     output_dir: Optional[Path] = typer.Option(
         None,
         "--output-dir",
@@ -121,7 +126,9 @@ def analyze(
 ) -> None:
     """Analyze a new site page and generate a site config draft."""
     setup_logging()
-    result = asyncio.run(run_analyze(url, output_dir=output_dir, site_name=site_name))
+    result = asyncio.run(
+        run_analyze(url, output_dir=output_dir, site_name=site_name, save_config_name=save_config)
+    )
 
     typer.echo(f"site_name: {result.site_name}")
     typer.echo(f"url: {result.url}")
@@ -129,7 +136,10 @@ def analyze(
     typer.echo(f"html: {result.html_path}")
     typer.echo(f"screenshot: {result.screenshot_path}")
     typer.echo(f"report: {result.report_path}")
+    typer.echo(f"report_markdown: {result.report_markdown_path}")
     typer.echo(f"config: {result.config_path}")
+    if result.saved_config_path:
+        typer.echo(f"saved_config: {result.saved_config_path}")
 
 
 if __name__ == "__main__":

@@ -31,7 +31,9 @@ class AnalyzeResult:
     html_path: str
     screenshot_path: str | None
     report_path: str
+    report_markdown_path: str
     config_path: str
+    saved_config_path: str | None = None
 
 
 class SiteAnalyzer:
@@ -486,6 +488,7 @@ async def run_analyze(
     url: str,
     output_dir: Path | None = None,
     site_name: str | None = None,
+    save_config_name: str | None = None,
 ) -> AnalyzeResult:
     fetch_config = FetchConfig(headless=True, timeout_ms=45000, wait_until="domcontentloaded", delay_after_load_ms=1200)
     analyzer = SiteAnalyzer()
@@ -499,6 +502,7 @@ async def run_analyze(
     html_path = base_output / "page.html"
     screenshot_path = base_output / "page.png"
     report_path = base_output / "report.json"
+    report_markdown_path = base_output / "report.md"
     config_path = base_output / "site_config.yaml"
 
     async with PlaywrightFetcher(fetch_config) as fetcher:
@@ -523,10 +527,25 @@ async def run_analyze(
         json.dumps(analysis, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    report_markdown_path.write_text(
+        build_markdown_report(analysis),
+        encoding="utf-8",
+    )
     config_path.write_text(
         yaml.safe_dump(analysis["config"], allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
+
+    saved_config_path: Path | None = None
+    if save_config_name:
+        configs_dir = Path("configs") / "sites"
+        configs_dir.mkdir(parents=True, exist_ok=True)
+        file_name = save_config_name if save_config_name.endswith(".yaml") else f"{save_config_name}.yaml"
+        saved_config_path = configs_dir / file_name
+        saved_config_path.write_text(
+            yaml.safe_dump(analysis["config"], allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
 
     return AnalyzeResult(
         site_name=analysis["site_name"],
@@ -535,5 +554,82 @@ async def run_analyze(
         html_path=str(html_path),
         screenshot_path=str(screenshot_path),
         report_path=str(report_path),
+        report_markdown_path=str(report_markdown_path),
         config_path=str(config_path),
+        saved_config_path=str(saved_config_path) if saved_config_path else None,
     )
+
+
+def build_markdown_report(analysis: dict) -> str:
+    analysis_block = analysis["analysis"]
+    lines = [
+        "# 页面分析报告",
+        "",
+        f"- 站点标识：`{analysis['site_name']}`",
+        f"- 页面 URL：`{analysis['url']}`",
+        f"- 页面标题：`{analysis['page_title']}`",
+        "",
+        "## 页面分类",
+        "",
+        f"- 页面类型：`{analysis_block['page_type']}`",
+        f"- 是否建议 batch：`{analysis_block['batch_candidate']}`",
+        f"- batch 置信度：`{analysis_block['batch_confidence']}`",
+        f"- 正文文本长度：`{analysis_block['content_text_length']}`",
+        f"- 候选子链接数：`{analysis_block['child_link_count']}`",
+        "",
+        "## 判断依据",
+        "",
+    ]
+    for reason in analysis_block["reasoning"]:
+        lines.append(f"- {reason}")
+
+    lines.extend(
+        [
+            "",
+            "## 建议配置",
+            "",
+            f"- 标题 selector：`{analysis_block['title_selector']}`",
+            f"- 正文 selector：`{analysis['config']['extract']['content_selector']}`",
+            "",
+            "### 建议移除的噪音区域",
+            "",
+        ]
+    )
+    for selector in analysis_block["remove_selectors"]:
+        lines.append(f"- `{selector}`")
+
+    lines.extend(
+        [
+            "",
+            "### 正文候选区域",
+            "",
+        ]
+    )
+    for candidate in analysis_block["content_candidates"]:
+        lines.append(f"- `{candidate['selector']}` | score=`{candidate['score']}`")
+        lines.append(f"  - reason: {candidate['reason']}")
+        lines.append(f"  - preview: {candidate['preview']}")
+
+    lines.extend(
+        [
+            "",
+            "### 菜单候选区域",
+            "",
+        ]
+    )
+    for candidate in analysis_block["menu_candidates"]:
+        lines.append(f"- `{candidate['selector']}` | score=`{candidate['score']}`")
+        lines.append(f"  - reason: {candidate['reason']}")
+        lines.append(f"  - preview: {candidate['preview']}")
+
+    lines.extend(
+        [
+            "",
+            "### 候选子链接",
+            "",
+        ]
+    )
+    for item in analysis_block["child_links"]:
+        lines.append(f"- `{item['title']}` | `{item['url']}` | score=`{item['score']}`")
+
+    return "\n".join(lines)
